@@ -24,6 +24,7 @@
 
 ;;; Code:
 
+(require 'cl)
 (require 'term)
 
 (defgroup emux nil
@@ -32,27 +33,36 @@
   :prefix "emux:")
 
 (defcustom emux:shell-program nil
-  "Default shell program. If not specified, SHELL envrionment
-variable or ESHELL environment variable will be used."
+  "A file name of the default shell program. If not specified,
+SHELL envrionment variable or ESHELL environment variable will be
+used."
   :type 'string
   :group 'emux)
 
 (defcustom emux:terminal-name "emux"
-  "Default terminal name prefix."
+  "A prefix string of terminal buffer names."
   :type 'string
   :group 'emux)
 
+(defface emux:tab-bar-face
+  '((t (:background "gray60" :foreground "white")))
+  "Tab bar face."
+  :group 'emux)
+
 (defface emux:tab-face
-  '()
+  '((t (:background "gray60" :foreground "white")))
   "Tab face."
   :group 'emux)
 
 (defface emux:current-tab-face
-  '((t (:background "steelblue" :foreground "white")))
+  '((t (:background "#999" :foreground "white" :bold t :box (:style released-button))))
   "Current tab face."
   :group 'emux)
 
 (defun emux:shell-program ()
+  "Return a shell program name to be executed, If no shell
+programs is found in the environment, this function asks a shell
+program name and return it."
   (or emux:shell-program
       (getenv "SHELL")
       (getenv "ESHELL")
@@ -60,125 +70,193 @@ variable or ESHELL environment variable will be used."
 
 
 
-(defvar emux:terminals nil
-  "A list of terminal buffers.")
-
 (defvar emux:current-terminal nil
-  "A current terminal buffer.")
+  "A current terminal. Note that this may point to null or a dead
+terminal.")
+
+(defstruct (emux:terminal (:constructor emux:make-terminal))
+  name next previous buffer)
 
 (defun emux:terminal-live-p (term)
-  (and (buffer-live-p term)
-       (term-check-proc term)
+  (and (emux:terminal-p term)
+       (buffer-live-p (emux:terminal-buffer term))
+       (term-check-proc (emux:terminal-buffer term))
        t))
 
+(defun emux:current-live-terminal ()
+  (let ((term emux:current-terminal))
+    (if (emux:terminal-live-p term)
+        term
+      (or (emux:previous-live-terminal term)
+          (emux:next-live-terminal term)))))
+
+(defun* emux:next-live-terminal (term &key cycle)
+  (while (and term
+              (setq term (emux:terminal-next term))
+              (not (emux:terminal-live-p term))))
+  (or term (and cycle (emux:first-terminal))))
+
+(defun* emux:previous-live-terminal (term &key cycle)
+  (while (and term
+              (setq term (emux:terminal-previous term))
+              (not (emux:terminal-live-p term))))
+  (or term (and cycle (emux:last-terminal))))
+
+(defun emux:first-terminal ()
+  (do ((term emux:current-terminal (emux:terminal-previous term)))
+      ((or (null term)
+           (null (emux:terminal-previous term)))
+       term)))
+
+(defun emux:last-terminal ()
+  (do ((term emux:current-terminal (emux:terminal-next term)))
+      ((or (null term)
+           (null (emux:terminal-next term)))
+       term)))
+
+(defun emux:list-terminals ()
+  (loop for term = (emux:first-terminal) then (emux:terminal-next term)
+        while term collect term))
+
 (defun emux:live-terminals ()
-  (loop for term in emux:terminals
+  (loop for term in (emux:list-terminals)
         if (emux:terminal-live-p term)
         collect term))
 
-(defun emux:cleanup-dead-terminals ()
-  (setq emux:terminals
-        (loop for term in emux:terminals
-              if (emux:terminal-live-p term)
-              collect term
-              else if (buffer-live-p term)
-              do (kill-buffer term))))
+(defun emux:dead-terminals ()
+  (loop for term in (emux:list-terminals)
+        unless (emux:terminal-live-p term)
+        collect term))
 
-(defun emux:current-terminal ()
-  (if (emux:terminal-live-p emux:current-terminal)
-      emux:current-terminal
-    (setq emux:current-terminal
-          (first (emux:live-terminals)))))
+(defun emux:add-terminal (term)
+  (let ((last (emux:last-terminal)))
+    (if last
+        (setf (emux:terminal-next last) term
+              (emux:terminal-previous term) last)
+      (setq emux:current-terminal term)))
+  term)
 
-(defun emux:next-terminal ()
-  (let* ((terminals (emux:live-terminals))
-         (current-term (emux:current-terminal))
-         (next-term (second (memq current-term terminals))))
-    (or next-term (first terminals))))
-
-(defun emux:previous-terminal ()
-  (let* ((terminals (reverse (emux:live-terminals)))
-         (current-term (emux:current-terminal))
-         (previous-term (second (memq current-term terminals))))
-    (or previous-term (first terminals))))
+(defun emux:clean-dead-terminals ()
+  (setq emux:current-terminal (emux:current-live-terminal))
+  (loop for prev = nil then term
+        for terms on (emux:live-terminals)
+        for term = (first terms)
+        for next = (second terms)
+        do (setf (emux:terminal-previous term) prev
+                 (emux:terminal-next term) next))
+  (loop for term in (emux:dead-terminals)
+        for buffer = (emux:terminal-buffer term)
+        if (buffer-live-p)
+        do (kill-buffer buffer)))
 
 
 
-(defun emux:make-terminal (name program)
-  (emux:cleanup-dead-terminals)
-  (let ((term (generate-new-buffer name)))
-    (with-current-buffer term
-      (emux:term-mode))
-    (term-exec term name program nil nil)
-    (with-current-buffer term
-      (term-char-mode))
-    (add-to-list 'emux:terminals term t)
-    term))
+(defun emux:make-terminal-buffer (name program)
+  (let ((buffer (generate-new-buffer name)))
+    (with-current-buffer buffer (emux:term-mode))
+    (term-exec buffer name program nil nil)
+    (with-current-buffer buffer (term-char-mode))
+    buffer))
 
-(defun emux:make-terminal-header (term)
-  (loop for other-term in (emux:live-terminals)
-        for tab = (format " %s " (buffer-name other-term))
-        collect (propertize tab
-                            'face (if (eq term other-term)
-                                      'emux:current-tab-face
-                                    'emux:tab-face))
-        into tabs
-        finally return (mapconcat 'identity tabs "")))
+(defun emux:new-terminal-1 (name program)
+  (let* ((buffer (emux:make-terminal-buffer name program))
+         (term (emux:make-terminal :name name :buffer buffer)))
+    (emux:add-terminal term)))
 
-(defun emux:update-terminal-header (term)
-  (with-current-buffer term
-    (setq header-line-format (emux:make-terminal-header term))))
+(defun emux:new-terminal ()
+  (emux:clean-dead-terminals)
+  (emux:new-terminal-1 emux:terminal-name (emux:shell-program)))
 
-(defun emux:update-terminal (term)
-  (emux:update-terminal-header term))
+(defun emux:make-terminal-header (term &optional window)
+  (loop with win = (or window (selected-window))
+        with win-width = (window-total-width win)
+        with win-left-fringe = (nth 0 (window-inside-edges win))
+        for live-term in (emux:live-terminals)
+        for tab = (propertize
+                   (format " %s " (emux:terminal-name live-term))
+                   'face (if (eq term live-term)
+                             'emux:current-tab-face
+                           'emux:tab-face))
+        collect tab into tabs
+        finally return
+        (let* ((left-fringe (propertize (make-string win-left-fringe ? )
+                                        'face 'emux:tab-bar-face))
+               (tabs-string (mapconcat 'identity tabs ""))
+               (right-padding (propertize
+                               (make-string
+                                (max 0
+                                     (- win-width
+                                        (length tabs-string)
+                                        win-left-fringe))
+                                ? )
+                               'face 'emux:tab-bar-face)))
+          (concat left-fringe tabs-string right-padding))))
+
+(defun emux:update-terminal-header (term &optional window)
+  (with-current-buffer (emux:terminal-buffer term)
+    (setq header-line-format (emux:make-terminal-header term window))))
+
+(defun emux:update-terminal (term &optional window)
+  (emux:update-terminal-header term window))
 
 (defun emux:switch-to-terminal (term)
   (setq emux:current-terminal term)
-  (emux:update-terminal term)
-  (switch-to-buffer term))
+  (prog1 term
+    (switch-to-buffer (emux:terminal-buffer term))
+    (emux:update-terminal term)))
 
 (defun emux:switch-to-terminal-other-window (term)
   (setq emux:current-terminal term)
-  (emux:update-terminal term)
-  (switch-to-buffer-other-window term))
-
-(defun emux:new-terminal ()
-  (emux:make-terminal emux:terminal-name
-                      (emux:shell-program)))
+  (prog1 term
+    (switch-to-buffer-other-window (emux:terminal-buffer term))
+    (emux:update-terminal term)))
 
 
 
 (defun emux:term-mode ()
+  "Emux Terminal Mode."
   (interactive)
   (term-mode))
 
 (defun emux:term-noselect ()
+  "Open the current terminal or a new terminal without selecting."
   (interactive)
-  (or (emux:current-terminal) (emux:new-terminal)))
+  (or (emux:current-live-terminal) (emux:new-terminal)))
 
 ;;;###autoload
 (defun emux:term ()
+  "Open the current terminal or a new terminal in this window."
   (interactive)
-  (emux:switch-to-terminal
-   (emux:term-noselect)))
+  (emux:switch-to-terminal (emux:term-noselect)))
 
 ;;;###autoload
 (defun emux:term-other-window ()
+  "Open the current terminal or a new terminal in other window."
   (interactive)
-  (emux:switch-to-terminal-other-window
-   (emux:term-noselect)))
+  (emux:switch-to-terminal-other-window (emux:term-noselect)))
 
 (defun emux:term-new ()
+  "Create and open a new terminal."
   (interactive)
   (emux:switch-to-terminal (emux:new-terminal)))
 
-(defun emux:term-next ()
-  (interactive)
-  (emux:switch-to-terminal (emux:next-terminal)))
-
 (defun emux:term-previous ()
+  "Switch to the previous terminal."
   (interactive)
-  (emux:switch-to-terminal (emux:previous-terminal)))
+  (emux:switch-to-terminal (emux:previous-live-terminal emux:current-terminal :cycle t)))
+
+(defun emux:term-next ()
+  "Switch to the next terminal."
+  (interactive)
+  (emux:switch-to-terminal (emux:next-live-terminal emux:current-terminal :cycle t)))
+
+(defun emux:term-rename ()
+  "Rename the current terminal."
+  (interactive)
+  (let* ((term (or (emux:current-live-terminal) (error "No current terminal")))
+         (new-name (read-from-minibuffer "New name: ")))
+    (setf (emux:terminal-name term) new-name)
+    (emux:update-terminal term)))
 
 (provide 'emux)
 ;;; emux.el ends here

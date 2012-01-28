@@ -83,6 +83,13 @@ terminal.")
        (term-check-proc (emux:terminal-buffer term))
        t))
 
+(defun emux:terminal-kill (term)
+  (let ((buffer (emux:terminal-buffer term)))
+    (when (term-check-proc buffer)
+      (delete-process buffer))
+    (when (buffer-live-p buffer)
+      (kill-buffer buffer))))
+
 (defun emux:current-live-terminal ()
   (let ((term emux:current-terminal))
     (if (emux:terminal-live-p term)
@@ -257,6 +264,17 @@ terminal.")
          (new-name (read-from-minibuffer "New name: ")))
     (setf (emux:terminal-name term) new-name)
     (emux:update-terminal term)))
+
+(defun emux:term-kill ()
+  "Kill the current terminal."
+  (interactive)
+  (let ((term (emux:current-live-terminal)))
+    (unless term (error "No terminals"))
+    (when (yes-or-no-p "Really kill this terminal?")
+      (let ((selected (eq (emux:terminal-buffer term) (current-buffer))))
+        (emux:terminal-kill term)
+        (when selected
+          (emux:switch-to-terminal (emux:current-live-terminal)))))))
 
 (provide 'emux)
 ;;; emux.el ends here

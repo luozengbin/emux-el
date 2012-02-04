@@ -97,6 +97,10 @@ terminal.")
       (or (emux:previous-live-terminal term)
           (emux:next-live-terminal term)))))
 
+(defun emux:current-live-terminal! ()
+  (or (emux:current-live-terminal)
+      (error "No current terminal")))
+
 (defun* emux:next-live-terminal (term &key cycle)
   (while (and term
               (setq term (emux:terminal-next term))
@@ -225,6 +229,29 @@ terminal.")
   (interactive)
   (term-mode))
 
+(defun emux:term-kill-input ()
+  "Kill the current input."
+  (interactive)
+  (if (term-in-char-mode)
+      (term-send-raw-string "\C-u")
+    (term-kill-input)))
+
+(defun emux:term-send-input ()
+  "Send the current input."
+  (interactive)
+  (if (term-in-char-mode)
+      (term-send-raw-string "\C-m")
+    (term-send-input)))
+
+(defun emux:term-command (command &optional record-flag)
+  "Send COMMAND to the current terminal. The current input will
+be ignored."
+  (interactive "sCommand: ")
+  (emux:term-kill-input)
+  (unless record-flag (term-send-raw-string " "))
+  (term-send-raw-string command)
+  (emux:term-send-input))
+
 (defun emux:term-noselect ()
   "Open the current terminal or a new terminal without selecting."
   (interactive)
@@ -260,7 +287,7 @@ terminal.")
 (defun emux:term-rename ()
   "Rename the current terminal."
   (interactive)
-  (let* ((term (or (emux:current-live-terminal) (error "No current terminal")))
+  (let* ((term (emux:current-live-terminal!))
          (new-name (read-from-minibuffer "New name: ")))
     (setf (emux:terminal-name term) new-name)
     (emux:update-terminal term)))
@@ -268,13 +295,24 @@ terminal.")
 (defun emux:term-kill ()
   "Kill the current terminal."
   (interactive)
-  (let ((term (emux:current-live-terminal)))
-    (unless term (error "No terminals"))
+  (let ((term (emux:current-live-terminal!)))
     (when (yes-or-no-p "Really kill this terminal?")
       (let ((selected (eq (emux:terminal-buffer term) (current-buffer))))
         (emux:terminal-kill term)
         (when selected
           (emux:switch-to-terminal (emux:current-live-terminal)))))))
+
+(defun emux:term-cd (directory)
+  "Change directory of the current terminal."
+  (interactive "DDirectory: ")
+  (emux:term-command (format "cd %S" (expand-file-name directory))))
+
+(defun emux:term-sync (&optional buffer)
+  "Change directory of the current terminal to the default
+directory of BUFFER. If BUFFER is nil, `other-buffer' will be used."
+  (interactive)
+  (setq buffer (or buffer (other-buffer (current-buffer) t)))
+  (emux:term-cd (with-current-buffer buffer default-directory)))
 
 (provide 'emux)
 ;;; emux.el ends here

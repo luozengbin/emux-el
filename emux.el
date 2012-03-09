@@ -27,6 +27,19 @@
 (require 'cl)
 (require 'term)
 
+
+
+;;; Utility
+
+(defun emux:window-total-width (&optional window)
+  (if (fboundp 'window-total-width)
+      (window-total-width window)
+    (destructuring-bind (left rop right bottom)
+        (window-edges window)
+      (- right left))))
+
+
+
 (defgroup emux nil
   "Emacs Terminal Multiplexer."
   :group 'terminals
@@ -180,7 +193,7 @@ terminal.")
 
 (defun emux:make-terminal-header (term &optional window)
   (loop with win = (or window (selected-window))
-        with win-width = (window-total-width win)
+        with win-width = (emux:window-total-width win)
         with win-left-fringe = (nth 0 (window-inside-edges win))
         for live-term in (emux:live-terminals)
         for tab = (propertize

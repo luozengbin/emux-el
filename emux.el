@@ -58,17 +58,17 @@ used."
   :group 'emux)
 
 (defface emux:tab-bar-face
-  '((t (:background "gray60" :foreground "white")))
+  '((t (:background "black" :foreground "white")))
   "Tab bar face."
   :group 'emux)
 
 (defface emux:tab-face
-  '((t (:background "gray60" :foreground "white")))
+  '((t (:background "black" :foreground "white")))
   "Tab face."
   :group 'emux)
 
 (defface emux:current-tab-face
-  '((t (:background "#999" :foreground "white" :bold t :box (:style released-button))))
+  '((t (:background "steelblue" :foreground "white" :bold t)))
   "Current tab face."
   :group 'emux)
 

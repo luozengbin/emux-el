@@ -170,7 +170,7 @@ terminal.")
                  (emux:terminal-next term) next))
   (loop for term in (emux:dead-terminals)
         for buffer = (emux:terminal-buffer term)
-        if (buffer-live-p)
+        if (buffer-live-p buffer)
         do (kill-buffer buffer)))
 
 

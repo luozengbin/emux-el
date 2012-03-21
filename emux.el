@@ -238,10 +238,32 @@ terminal.")
 
 
 
+(defvar emux:term-raw-escape-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map term-raw-escape-map)
+    (define-key map (kbd "C-n") 'emux:term-next)
+    (define-key map (kbd "SPC") 'emux:term-next)
+    (define-key map (kbd "C-p") 'emux:term-previous)
+    (define-key map (kbd "C-t") 'emux:term-new)
+    (define-key map (kbd "A")   'emux:term-rename)
+    (define-key map (kbd "k")   'emux:term-kill)
+    (define-key map (kbd "d")   'emux:term-cd)
+    (define-key map (kbd "~")   'emux:term-sync)
+    map))
+
+(defvar emux:term-raw-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map term-raw-map)
+    (define-key map (kbd "C-c") emux:term-raw-escape-map)
+    map))
+
 (defun emux:term-mode ()
   "Emux Terminal Mode."
   (interactive)
-  (term-mode))
+  (let ((term-raw-map emux:term-raw-map))
+    (term-mode))
+  (set (make-local-variable 'term-raw-map) emux:term-raw-map)
+  (values))
 
 (defun emux:term-kill-input ()
   "Kill the current input."
